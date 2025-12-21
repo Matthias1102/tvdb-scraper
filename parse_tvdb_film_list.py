@@ -4,13 +4,14 @@ from pathlib import Path
 import ast
 import re
 import pandas as pd
-from rename_er_episodes import load_episodes, find_best_match, build_new_filename, JSON_FILE
+from er_matching import load_episodes, find_best_match, build_new_filename
 
 # -------- configuration --------
 INPUT_FILE = "MediathekView-Filmliste-Eisenbahn-Romantik.txt"
 MIN_DURATION = "00:25:00"
 MIN_CONFIDENCE = 0.50          # same threshold used by copy_er_episodes.py
 SORT_DESCENDING = True         # True = longest duration first
+TVDB_JSON_FILE = "eisenbahn_romantik_tvdb_episodes_and_specials.json"
 OUTPUT_CSV = "MediathekView-Filmliste-Eisenbahn-Romantik_with_TVDB_matches.csv"
 OUTPUT_XLSX = "MediathekView-Filmliste-Eisenbahn-Romantik_with_TVDB_matches.xlsx"
 # --------------------------------
@@ -59,7 +60,7 @@ def parse_input_rows(path: str):
 
 def main():
     # Load TVDB episodes once
-    episodes = load_episodes(JSON_FILE)
+    episodes = load_episodes(TVDB_JSON_FILE)
 
     rows = parse_input_rows(INPUT_FILE)
     df = pd.DataFrame(rows)
