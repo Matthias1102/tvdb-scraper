@@ -1,24 +1,22 @@
 #! /usr/bin/env python3
-
 """
-fetch-railway-romance-episodes.py
+fetch-railway-romance-specials.py
 ---------------------------------
 
-This script downloads a complete episode list for the TV series
-"Eisenbahn-Romantik" from TheTVDB's public "All Seasons" page:
+This script downloads the episode list for the *specials* (Season 0) of the TV
+series "Eisenbahn-Romantik" from TheTVDB's public Season 0 page:
 
-    https://thetvdb.com/series/railway-romance/allseasons/official
+    https://thetvdb.com/series/railway-romance/seasons/official/0
 
 It extracts:
-  • season/episode codes (SyyyyEnn format)
-  • air dates (converted to YYYY-MM-DD)
-  • absolute episode numbers (sequential 1..N)
+  • season/episode codes (specials are forced to S0000Enn)
+  • air dates (converted to YYYY-MM-DD when possible)
+  • absolute episode numbers (sequential 1..N within specials list)
   • titles (as provided by TheTVDB)
-  • both regular episodes and specials (Season 0)
 
 Two output files are generated in the script directory:
-    eisenbahn_romantik_tvdb_with_specials.csv
-    eisenbahn_romantik_tvdb_with_specials.json
+    eisenbahn_romantik_tvdb_specials.csv
+    eisenbahn_romantik_tvdb_specials.json
 
 CSV format:
     SeasonEpisode,Date,AbsEpisode,Title
@@ -33,12 +31,12 @@ JSON format:
         abs_episode
 
 Usage:
-    python fetch-railway-romance-episodes.py
+    python fetch-railway-romance-specials.py
 
 Notes:
   • This script does *not* rely on TheTVDB’s API, only on the public HTML pages.
   • Specials (Season 0) are given a year code of "0000" → e.g. S0000E01.
-  • Absolute episode numbers are assigned in the order they appear on TheTVDB.
+  • Absolute episode numbers are assigned in the order after sorting by ep_in_season.
   • If TheTVDB changes its HTML layout, the scraper may need adjustments.
 """
 
@@ -53,18 +51,18 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-ALLSEASONS_URL = "https://thetvdb.com/series/railway-romance/allseasons/official"
+SPECIALS_URL = "https://thetvdb.com/series/railway-romance/seasons/official/0"
 BASE_URL = "https://thetvdb.com"
 
 
 @dataclass
 class Episode:
-    season_episode_code: str  # SyyyyEnn (yyyy = year, or 0000 for specials)
-    season_raw: int           # Season number from TheTVDB (0 = specials, 1991 = year etc.)
-    ep_in_season: int         # Episode number within that season
+    season_episode_code: str  # S00Enn for specials
+    season_raw: int           # 0 for specials
+    ep_in_season: int         # Episode number within season 0
     title: str
-    air_date_iso: str         # yyyy-mm-dd or "" (if missing on TheTVDB)
-    abs_episode: Optional[int] = None  # will be filled later as 1..N
+    air_date_iso: str         # yyyy-mm-dd or "" (if missing/unparseable)
+    abs_episode: Optional[int] = None  # 1..N (within specials list)
 
 
 def parse_date_en(date_str: str) -> str:
@@ -86,17 +84,12 @@ def parse_date_en(date_str: str) -> str:
     return ""
 
 
-def fetch_all_episodes_from_allseasons() -> List[Episode]:
+def fetch_specials() -> List[Episode]:
     """
-    Fetch episodes from TheTVDB "All Seasons" page:
-
-      - Normal episodes: S1991E01, S1992E05, ...
-      - Specials (season 0): S0E1, S0E12, ...
-
-    For each episode we extract:
-      - SeasonEpisode code (SyyyyEnn, yyyy=0000 for season 0)
-      - Title
-      - Air date (if present)
+    Fetch specials from TheTVDB Season 0 page and return a list of Episode objects.
+    Tries to be resilient to minor HTML variations by:
+      - finding all episode links
+      - reading surrounding text for S0E.. patterns and dates
     """
     headers = {
         "User-Agent": (
@@ -104,13 +97,14 @@ def fetch_all_episodes_from_allseasons() -> List[Episode]:
         )
     }
 
-    print(f"Loading All-Seasons page: {ALLSEASONS_URL}")
-    resp = requests.get(ALLSEASONS_URL, headers=headers, timeout=30)
+    print(f"Loading Specials (Season 0) page: {SPECIALS_URL}")
+    resp = requests.get(SPECIALS_URL, headers=headers, timeout=30)
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # All episode links on the All Seasons page
+    # Episodes on season pages are typically linked like:
+    # /series/railway-romance/episodes/<id>
     episode_links = soup.select('a[href*="/series/railway-romance/episodes/"]')
 
     episodes: List[Episode] = []
@@ -126,24 +120,29 @@ def fetch_all_episodes_from_allseasons() -> List[Episode]:
             continue
         seen_urls.add(url)
 
-        # Use parent <li> as context; it contains code, title, date, etc.
-        li = a.find_parent("li")
-        if li is None:
-            parent = a.parent
-            text_block = parent.get_text(" ", strip=True) if parent else a.get_text(" ", strip=True)
-        else:
-            text_block = li.get_text(" ", strip=True)
+        # Use parent <tr> or <li> as context (TVDB sometimes uses tables on season pages)
+        container = a.find_parent(["tr", "li", "div"])
+        text_block = (
+            container.get_text(" ", strip=True)
+            if container is not None
+            else a.get_text(" ", strip=True)
+        )
 
-        # Match S<season>E<episode>, e.g. S1991E01, S0E1
-        m = re.search(r"S(\d{1,4})E(\d{1,3})", text_block)
+        # We only want specials (season 0). Match patterns like:
+        #   S0E1, S00E01, S0 E1 (rare), etc.
+        m = re.search(r"S\s*0+\s*E\s*(\d{1,3})", text_block, flags=re.IGNORECASE)
         if not m:
-            continue
+            # Sometimes TVDB may omit the 'S0E..' prefix in the visible text.
+            # As a fallback, try to find an explicit episode number label like "Episode 12".
+            m2 = re.search(r"\bEpisode\s+(\d{1,3})\b", text_block, flags=re.IGNORECASE)
+            if not m2:
+                continue
+            ep_in_season = int(m2.group(1))
+        else:
+            ep_in_season = int(m.group(1))
 
-        season_raw = int(m.group(1))          # e.g. 1991 or 0
-        ep_in_season = int(m.group(2))        # e.g. 1
-
-        # SeasonEpisode code with 4-digit season (0000 for specials)
-        season_episode_code = f"S{season_raw:04d}E{ep_in_season:02d}"
+        season_raw = 0
+        season_episode_code = f"S{0:02d}E{ep_in_season:02d}"  # S00E01 ... S00E100 ...
 
         # Extract English date from the text (e.g. "April 7, 1991")
         date_match = re.search(r"([A-Za-z]+ \d{1,2}, \d{4})", text_block)
@@ -161,15 +160,23 @@ def fetch_all_episodes_from_allseasons() -> List[Episode]:
             )
         )
 
-    # Sort in the order TheTVDB uses: season, then episode-in-season
-    episodes.sort(key=lambda e: (e.season_raw, e.ep_in_season))
-    print(f"Found {len(episodes)} episodes (including specials).")
+    # Deduplicate by (season_raw, ep_in_season, title) just in case multiple links exist per row.
+    uniq = {}
+    for ep in episodes:
+        key = (ep.season_raw, ep.ep_in_season, ep.title)
+        uniq[key] = ep
+    episodes = list(uniq.values())
+
+    # Order by episode number within specials
+    episodes.sort(key=lambda e: e.ep_in_season)
+
+    print(f"Found {len(episodes)} specials.")
     return episodes
 
 
 def assign_absolute_numbers(episodes: List[Episode]) -> None:
     """
-    Assign absolute episode numbers 1..N in the listing order.
+    Assign absolute episode numbers 1..N within the specials list.
     """
     for idx, ep in enumerate(episodes, start=1):
         ep.abs_episode = idx
@@ -183,7 +190,6 @@ def write_csv(episodes: List[Episode], filename: str) -> None:
     with open(filename, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["SeasonEpisode", "Date", "AbsEpisode", "Title"])
-
         for ep in episodes:
             w.writerow(
                 [
@@ -197,10 +203,7 @@ def write_csv(episodes: List[Episode], filename: str) -> None:
 
 def write_json(episodes: List[Episode], filename: str) -> None:
     """
-    Write JSON list of episodes.
-    Each episode includes:
-      season_episode_code, season_raw, ep_in_season, title,
-      air_date_iso, abs_episode
+    Write JSON list of specials.
     """
     data = [asdict(ep) for ep in episodes]
     with open(filename, "w", encoding="utf-8") as f:
@@ -208,11 +211,11 @@ def write_json(episodes: List[Episode], filename: str) -> None:
 
 
 def main():
-    episodes = fetch_all_episodes_from_allseasons()
+    episodes = fetch_specials()
     assign_absolute_numbers(episodes)
 
-    csv_file = "eisenbahn_romantik_tvdb_episodes.csv"
-    json_file = "eisenbahn_romantik_tvdb_episodes.json"
+    csv_file = "eisenbahn_romantik_tvdb_specials.csv"
+    json_file = "eisenbahn_romantik_tvdb_specials.json"
 
     write_csv(episodes, csv_file)
     print(f"CSV written to: {csv_file}")

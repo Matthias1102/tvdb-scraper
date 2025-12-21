@@ -1,8 +1,8 @@
 #! /usr/bin/env python3
 
 """
-copy_er_episodes.py
-----------------------
+rename_er_episodes.py
+---------------------
 
 This script copies downloaded Eisenbahn-Romantik video files (*.mp4) from a
 source folder to a destination folder, naming the copied files based on
@@ -25,7 +25,6 @@ Usage:
 Notes:
   • Non-matching or low-confidence matches (score < 0.50) are skipped.
   • No files are overwritten; existing target filenames are preserved.
-
 """
 
 import os
@@ -37,8 +36,12 @@ import unicodedata
 import shutil
 from difflib import SequenceMatcher
 
-JSON_FILE = "eisenbahn_romantik_tvdb_with_specials.json"
+JSON_FILE = "eisenbahn_romantik_tvdb_episodes_and_specials.json"
 
+
+# ----------------------------------------------------------------------
+# Normalization helpers
+# ----------------------------------------------------------------------
 
 def normalize(s):
     s = s.replace("\u00df", "ss")
@@ -49,6 +52,25 @@ def normalize(s):
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
+SERIES_PREFIX_RE = re.compile(
+    r"""^\s*
+        eisenbahn\s*[-–—]?\s*romantik
+        \s*(?:[:\-–—]\s*)?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def strip_series_prefix(s):
+    if not s:
+        return s
+    return SERIES_PREFIX_RE.sub("", s).strip()
+
+
+# ----------------------------------------------------------------------
+# Episode loading
+# ----------------------------------------------------------------------
 
 def load_episodes(json_path):
     with open(json_path, "r", encoding="utf-8") as f:
@@ -63,11 +85,18 @@ def load_episodes(json_path):
                 "air_date_iso": ep.get("air_date_iso", ""),
                 "abs_episode": ep.get("abs_episode"),
                 "title": title,
+                # normalized full title (kept for reference/debugging)
                 "norm_title": normalize(title),
+                # normalized title WITHOUT "Eisenbahn-Romantik"
+                "norm_title_noprefix": normalize(strip_series_prefix(title)),
             }
         )
     return episodes
 
+
+# ----------------------------------------------------------------------
+# Filename parsing
+# ----------------------------------------------------------------------
 
 def extract_raw_title_from_filename(filename):
     name = os.path.splitext(os.path.basename(filename))[0]
@@ -77,8 +106,15 @@ def extract_raw_title_from_filename(filename):
     return name.strip()
 
 
+# ----------------------------------------------------------------------
+# Matching logic
+# ----------------------------------------------------------------------
+
+def contains_whole_query(query, candidate):
+    return f" {query} " in f" {candidate} "
+
 def find_best_match(title, episodes):
-    norm_title = normalize(title)
+    norm_title = normalize(strip_series_prefix(title))
     if not norm_title:
         return None, 0.0
 
@@ -86,13 +122,26 @@ def find_best_match(title, episodes):
     best_score = 0.0
 
     for ep in episodes:
-        score = SequenceMatcher(None, norm_title, ep["norm_title"]).ratio()
+        cand = ep["norm_title_noprefix"]
+        if not cand:
+            continue
+
+        # 🚨 HARD RULE: exact containment wins
+        if contains_whole_query(norm_title, cand):
+            return ep, 1.0
+
+        score = SequenceMatcher(None, norm_title, cand).ratio()
+
         if score > best_score:
             best_score = score
             best_ep = ep
 
     return best_ep, best_score
 
+
+# ----------------------------------------------------------------------
+# Filename construction
+# ----------------------------------------------------------------------
 
 def sanitize_for_filename(s):
     s = s.replace("/", "-").replace("\\", "-")
@@ -101,13 +150,17 @@ def sanitize_for_filename(s):
 
 
 def build_new_filename(ep):
-    season_code = ep["season_episode_code"] or "S0000E00"
+    season_code = ep["season_episode_code"] or "S00E00"
     air_date = ep["air_date_iso"] or "0000-00-00"
     abs_ep = ep["abs_episode"]
     abs_ep_str = str(abs_ep) if abs_ep is not None else "0"
     title = sanitize_for_filename(ep["title"] or "Unknown Title")
     return f"Eisenbahn-Romantik {season_code} - {air_date} - {abs_ep_str} - {title}.mp4"
 
+
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
 
 def main():
     if len(sys.argv) != 3:
