@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-copy_from_xlsx_titles.py
------------------------
+copy_from_xlsx_maps.py
+----------------------
 
 Copy+rename MP4 files using an XLSX table as source of truth.
 

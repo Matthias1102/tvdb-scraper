@@ -1,5 +1,67 @@
 #! /usr/bin/env python3
 
+"""
+parse_tvdb_film_list.py
+-----------------------
+
+This script parses a MediathekView “Filmliste” export for the TV series
+"Eisenbahn-Romantik" and enriches each entry with the best matching TVDB
+episode (if any), including a suggested target filename.
+
+Input:
+  - A text file (INPUT_FILE) that contains one record per line in the form:
+        <key>: <python-literal>,
+    where <python-literal> is a list-like structure as produced by certain
+    MediathekView exports. The script uses `ast.literal_eval` to parse the
+    literal safely.
+
+TVDB episode data:
+  - A JSON file (TVDB_JSON_FILE) created by your TVDB scraper. It must contain
+    a list of episode dictionaries with fields such as:
+      - title
+      - season_episode_code
+      - air_date_iso
+      - abs_episode
+
+Processing steps:
+  1) Read and parse all records from INPUT_FILE.
+  2) Keep only rows that contain at least 8 fields (to ensure required indices).
+  3) Filter by minimum duration (MIN_DURATION).
+  4) Extract the “Folge <n>” episode number from the description field (if present).
+  5) For each remaining row, fuzzy-match the MediathekView title against TVDB
+     episode titles using `er_matching.find_best_match`.
+  6) If the match confidence is >= MIN_CONFIDENCE, generate a proposed filename
+     using `er_matching.build_new_filename`. Otherwise, leave it empty (NA).
+  7) Write results to CSV and XLSX output files.
+
+Outputs:
+  - OUTPUT_CSV:
+      Contains filtered MediathekView entries plus:
+        - confidence  (float)
+        - new_filename (string or empty)
+  - OUTPUT_XLSX:
+      Same content as the CSV, in Excel format.
+
+Key columns in the output table:
+  - title, date, start_time, duration
+  - episode (Int64, extracted from description if present)
+  - confidence (0.0..1.0)
+  - new_filename (proposed target filename, only if confidence >= threshold)
+
+Usage:
+  - Adjust configuration variables at the top of the script as needed.
+  - Run:
+        python parse_tvdb_film_list.py
+
+Notes:
+  - The script currently sorts the output by broadcast date (descending).
+    The SORT_DESCENDING variable is defined for convenience but not currently
+    used for a duration-based sort.
+  - Matching quality depends on the TVDB dataset and the normalization/matching
+    strategy implemented in `er_matching.py`.
+"""
+
+
 from pathlib import Path
 import ast
 import re
