@@ -26,7 +26,7 @@ TVDB episode data:
 Processing steps:
   1) Read and parse all records from INPUT_FILE.
   2) Keep only rows that contain at least 8 fields (to ensure required indices).
-  3) Filter by minimum duration (MIN_DURATION).
+  3) Filter by minimum duration (MIN_DURATION) and maximum duration (MAX_DURATION).
   4) Extract the “Folge <n>” episode number from the description field (if present).
   5) For each remaining row, fuzzy-match the MediathekView title against TVDB
      episode titles using `er_matching.find_best_match`.
@@ -71,6 +71,7 @@ from er_matching import load_episodes, find_best_match, build_new_filename
 # -------- configuration --------
 INPUT_FILE = "MediathekView-Filmliste-Eisenbahn-Romantik.txt"
 MIN_DURATION = "00:25:00"
+MAX_DURATION = "23:59:59"
 MIN_CONFIDENCE = 0.50          # same threshold used by copy_er_episodes.py
 SORT_DESCENDING = True         # True = longest duration first
 TVDB_JSON_FILE = "eisenbahn_romantik_tvdb_episodes_and_specials.json"
@@ -133,7 +134,9 @@ def main():
     # Duration filtering
     df["duration_seconds"] = df[5].apply(parse_duration_to_seconds)
     min_seconds = parse_duration_to_seconds(MIN_DURATION)
-    df = df[df["duration_seconds"] >= min_seconds].copy()
+    max_seconds = parse_duration_to_seconds(MAX_DURATION)
+    df = df[(df["duration_seconds"] >= min_seconds) &
+            (df["duration_seconds"] <= max_seconds)].copy()
 
     # Episode number (if present in description)
     df["episode"] = df[7].apply(extract_episode_number).astype("Int64")
@@ -161,7 +164,7 @@ def main():
     # Drop helper column
     df_out = df_out.drop(columns=["duration_seconds"])
 
-    print(f"Remaining rows (duration >= {MIN_DURATION}): {len(df_out)}")
+    print(f"Remaining rows ({MIN_DURATION} <= duration <= {MAX_DURATION}): {len(df_out)}")
     print(f"Rows with filename (confidence >= {MIN_CONFIDENCE}): {df_out['new_filename'].notna().sum()}")
     print(df_out.head(15).to_string(index=False))
 
