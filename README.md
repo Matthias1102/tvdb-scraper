@@ -44,3 +44,8 @@ Find duplicate episodes, considering the videos that we already have from the re
 ```
 ./find_er_duplicates.py /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik-neu
 ```
+Identify which ER episodes we have in the filesystem, the result is written to:
+`eisenbahn_romantik_tvdb_episodes_and_specials_with_filesystem_check`:
+```
+./check_er_csv_against_filesystem.py eisenbahn_romantik_tvdb_episodes_and_specials.csv  /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/
+```
