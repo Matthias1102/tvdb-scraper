@@ -49,3 +49,20 @@ Identify which ER episodes we have in the filesystem, the result is written to:
 ```
 ./check_er_csv_against_filesystem.py eisenbahn_romantik_tvdb_episodes_and_specials.csv  /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/
 ```
+
+Download the MediathekView Filmliste and save it as `MediathekView-Eisenbahn-Romantik.json`:
+```
+./download_er_filmliste.py
+```
+
+Convert the file into a CSV file with columns: title,date,start_time,duration,episode
+ONLY episodes WITH an episode number ("Folge <n>") are kept.
+Duplicates are removed.
+```
+./convert_er_filmliste_json_to_csv.py MediathekView-Eisenbahn-Romantik.json  MediathekView-Eisenbahn-Romantik.csv
+```
+Identify missing episode videos and report them to
+`MediathekView-Eisenbahn-Romantik_missing.csv` and `/home/matthias/github/tvdb-scraper/MediathekView-Eisenbahn-Romantik_unparsed_filenames.txt`:
+```
+./report_missing_er_files.py MediathekView-Eisenbahn-Romantik.csv  /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/ eisenbahn_romantik_tvdb_episodes_and_specials.json
+```
