@@ -13,13 +13,14 @@ It extracts:
   • air dates (converted to YYYY-MM-DD when possible)
   • absolute episode numbers (sequential 1..N within specials list)
   • titles (as provided by TheTVDB)
+  • a suggested target filename for each episode
 
 Two output files are generated in the script directory:
     eisenbahn_romantik_tvdb_specials.csv
     eisenbahn_romantik_tvdb_specials.json
 
 CSV format:
-    SeasonEpisode,Date,AbsEpisode,Title
+    SeasonEpisode,Date,AbsEpisode,Title,TargetFilename
 
 JSON format:
     A list of dictionaries with fields:
@@ -29,6 +30,7 @@ JSON format:
         title
         air_date_iso
         abs_episode
+        target_filename
 
 Usage:
     python fetch-railway-romance-specials.py
@@ -55,14 +57,41 @@ SPECIALS_URL = "https://thetvdb.com/series/railway-romance/seasons/official/0"
 BASE_URL = "https://thetvdb.com"
 
 
+def sanitize_filename_component(s: str) -> str:
+    """
+    Make a string safe-ish for filenames across common filesystems.
+
+    - Replaces / and \\ with '-'
+    - Replaces common forbidden characters on Windows: <>:"|?* with ''
+    - Collapses whitespace
+    - Strips trailing dots/spaces
+    """
+    s = s.replace("/", "-").replace("\\", "-")
+    s = re.sub(r'[<>:"|?*]', "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s.rstrip(" .")
+    return s
+
+
+def build_target_filename(ep: "Episode") -> str:
+    """
+    Eisenbahn-Romantik <season_episode_code> - <air_date_iso> - <abs_episode> - <title>.mp4
+    Missing values are left blank (but separators remain stable).
+    """
+    abs_str = str(ep.abs_episode) if ep.abs_episode is not None else ""
+    title = sanitize_filename_component(ep.title)
+    return f"Eisenbahn-Romantik {ep.season_episode_code} - {ep.air_date_iso} - {abs_str} - {title}.mp4"
+
+
 @dataclass
 class Episode:
-    season_episode_code: str  # S00Enn for specials
+    season_episode_code: str  # S00Enn for specials (we'll store as S0000Enn)
     season_raw: int           # 0 for specials
     ep_in_season: int         # Episode number within season 0
     title: str
     air_date_iso: str         # yyyy-mm-dd or "" (if missing/unparseable)
     abs_episode: Optional[int] = None  # 1..N (within specials list)
+    target_filename: str = ""          # will be filled later
 
 
 def parse_date_en(date_str: str) -> str:
@@ -142,7 +171,8 @@ def fetch_specials() -> List[Episode]:
             ep_in_season = int(m.group(1))
 
         season_raw = 0
-        season_episode_code = f"S{0:02d}E{ep_in_season:02d}"  # S00E01 ... S00E100 ...
+        # Specials are forced to S0000Enn (year code "0000")
+        season_episode_code = f"S{0:04d}E{ep_in_season:02d}"  # S0000E01 ...
 
         # Extract English date from the text (e.g. "April 7, 1991")
         date_match = re.search(r"([A-Za-z]+ \d{1,2}, \d{4})", text_block)
@@ -174,22 +204,23 @@ def fetch_specials() -> List[Episode]:
     return episodes
 
 
-def assign_absolute_numbers(episodes: List[Episode]) -> None:
+def assign_absolute_numbers_and_filenames(episodes: List[Episode]) -> None:
     """
-    Assign absolute episode numbers 1..N within the specials list.
+    Assign absolute episode numbers 1..N within the specials list, and build target filenames.
     """
     for idx, ep in enumerate(episodes, start=1):
         ep.abs_episode = idx
+        ep.target_filename = build_target_filename(ep)
 
 
 def write_csv(episodes: List[Episode], filename: str) -> None:
     """
     Write CSV with columns:
-      SeasonEpisode, Date, AbsEpisode, Title
+      SeasonEpisode, Date, AbsEpisode, Title, TargetFilename
     """
     with open(filename, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["SeasonEpisode", "Date", "AbsEpisode", "Title"])
+        w.writerow(["SeasonEpisode", "Date", "AbsEpisode", "Title", "TargetFilename"])
         for ep in episodes:
             w.writerow(
                 [
@@ -197,6 +228,7 @@ def write_csv(episodes: List[Episode], filename: str) -> None:
                     ep.air_date_iso,
                     ep.abs_episode if ep.abs_episode is not None else "",
                     ep.title,
+                    ep.target_filename,
                 ]
             )
 
@@ -212,7 +244,7 @@ def write_json(episodes: List[Episode], filename: str) -> None:
 
 def main():
     episodes = fetch_specials()
-    assign_absolute_numbers(episodes)
+    assign_absolute_numbers_and_filenames(episodes)
 
     csv_file = "eisenbahn_romantik_tvdb_specials.csv"
     json_file = "eisenbahn_romantik_tvdb_specials.json"
