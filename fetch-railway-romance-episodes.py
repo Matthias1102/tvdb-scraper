@@ -17,8 +17,8 @@ It extracts:
   • both regular episodes and specials (Season 0)
 
 Two output files are generated in the script directory:
-    eisenbahn_romantik_tvdb_with_specials.csv
-    eisenbahn_romantik_tvdb_with_specials.json
+    eisenbahn_romantik_tvdb_episodes.csv
+    eisenbahn_romantik_tvdb_episodes.json
 
 CSV format:
     SeasonEpisode,Date,AbsEpisode,Title
@@ -37,8 +37,7 @@ Usage:
 
 Notes:
   • This script does *not* rely on TheTVDB’s API, only on the public HTML pages.
-  • Specials (Season 0) are given a year code of "0000" → e.g. S0000E01.
-  • Absolute episode numbers are assigned in the order they appear on TheTVDB.
+  • Absolute episode numbers are assigned after sorting by season and episode.
   • If TheTVDB changes its HTML layout, the scraper may need adjustments.
 """
 
