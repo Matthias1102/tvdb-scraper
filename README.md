@@ -83,7 +83,8 @@ Check which files are present on OMV:
 ```
 mount /mnt/omv-data1
 ./check_videos_presence.py --csv eisenbahn_romantik_tvdb_episodes.csv \
-                           --out eisenbahn_romantik_tvdb_episodes_with_presence_check.csv \
-                           --dir /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/
+                           --dir /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik \
+                           --csv-out  eisenbahn_romantik_tvdb_episodes_with_filesystem_check.csv \
+                           --xlsx-out eisenbahn_romantik_tvdb_episodes_with_filesystem_check.xlsx
 ```
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """
 check_videos_presence.py
 
@@ -17,7 +16,7 @@ The input CSV file must contain the following columns (in this order):
     SeasonEpisode,Date,AbsEpisode,Title,TargetFilename
 
 A new column named `VideoPresent` is inserted **between `AbsEpisode` and `Title`**
-in the output CSV.
+in the output CSV and XLSX.
 
 Matching Logic
 --------------
@@ -67,28 +66,33 @@ Recursive directory scan:
 
     python check_videos_presence.py --csv episodes.csv --dir /path/to/videos --recursive
 
-Example:
+Override output paths:
 
-    ./check_video_presence.py --csv eisenbahn_romantik_tvdb_episodes.csv \
-                              --out eisenbahn_romantik_tvdb_episodes_with_presence_check.csv \
-                              --dir /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik
+    python check_videos_presence.py --csv episodes.csv --dir /path/to/videos \
+        --csv-out custom.csv --xlsx-out custom.xlsx
 
 Output
 ------
-A new CSV file is written (by default `<input>_checked.csv`) containing all
-original columns plus the inserted `VideoPresent` column with values:
+Two files are always written by default, using:
+
+    <input>_with_filesystem_check.csv
+    <input>_with_filesystem_check.xlsx
+
+Both outputs contain all original columns plus the inserted `VideoPresent`
+column with values:
 
     True  — a matching video file was found
     False — no matching video file was found
+
+In the XLSX output, rows are colored:
+- Green if `VideoPresent` is True
+- Red if `VideoPresent` is False
 
 Exit Status
 -----------
 - 0 on success
 - non-zero if input files are missing or CSV format is invalid
 """
-
-
-
 
 from __future__ import annotations
 
@@ -98,6 +102,10 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
 
 
 # ---------- Normalization (lightweight but robust) ----------
@@ -171,11 +179,6 @@ def detect_dialect_and_headers(csv_path: Path, encoding: str) -> Tuple[csv.Diale
 
 # ---------- Prefix extraction (XL tolerant) ----------
 
-# Matches a stable prefix near the start of the filename:
-# ... S2024E10 - 2024-03-22 - 1071 - ...
-# ... S2024E10 - 2024-03-22 - 1071 XL - ...
-#
-# XL handling: allow optional "XL" after the digits with optional separators/spaces.
 PREFIX_RE = re.compile(
     r"""
     ^\s*
@@ -185,7 +188,7 @@ PREFIX_RE = re.compile(
     (?P<date>\d{4}-\d{2}-\d{2})    # yyyy-mm-dd
     \s*-\s*
     (?P<abs>\d+)                  # AbsEpisode number digits
-    (?:\s*[- ]?\s*xl)?            # optional XL suffix (e.g. " XL", "XL", "-XL") - case-insensitive via re.I
+    (?:\s*[- ]?\s*xl)?            # optional XL suffix (case-insensitive via re.I)
     \s*-\s*
     """,
     re.VERBOSE | re.IGNORECASE,
@@ -240,6 +243,52 @@ def build_key_index(directory: Path, recursive: bool) -> set[str]:
     return keys
 
 
+# ---------- XLSX helpers ----------
+
+_GREEN_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+_RED_FILL = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+_HEADER_FILL = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+
+
+def init_workbook(headers: List[str]) -> tuple[Workbook, object, List[int]]:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PresenceCheck"
+
+    ws.append(headers)
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(vertical="center")
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = _HEADER_FILL
+        cell.alignment = header_alignment
+
+    col_widths = [len(str(h)) if h is not None else 0 for h in headers]
+
+    ws.freeze_panes = "A2"
+    return wb, ws, col_widths
+
+
+def write_xlsx_row(ws, row_idx: int, values: List[str], is_present: bool, col_widths: List[int]) -> None:
+    ws.append(values)
+
+    fill = _GREEN_FILL if is_present else _RED_FILL
+
+    for j, cell in enumerate(ws[row_idx], start=0):
+        cell.fill = fill
+        cell.alignment = Alignment(vertical="top", wrap_text=False)
+        vlen = len(str(values[j])) if j < len(values) and values[j] is not None else 0
+        if vlen > col_widths[j]:
+            col_widths[j] = vlen
+
+
+def finalize_workbook(ws, col_widths: List[int]) -> None:
+    ws.auto_filter.ref = ws.dimensions
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = min(max(w + 2, 10), 60)
+
+
 # ---------- CLI ----------
 
 def parse_args() -> argparse.Namespace:
@@ -248,7 +297,20 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--csv", required=True, type=Path, help="Input CSV file path")
     p.add_argument("--dir", required=True, type=Path, help="Directory containing episode video files")
-    p.add_argument("--out", type=Path, default=None, help="Output CSV path (default: <input>_checked.csv)")
+
+    p.add_argument(
+        "--csv-out",
+        type=Path,
+        default=None,
+        help="Override CSV output path (CSV is always generated)",
+    )
+    p.add_argument(
+        "--xlsx-out",
+        type=Path,
+        default=None,
+        help="Override XLSX output path (XLSX is always generated)",
+    )
+
     p.add_argument("--recursive", action="store_true", help="Search recursively under --dir")
     p.add_argument("--encoding", default="utf-8-sig", help="CSV encoding (default: utf-8-sig)")
     p.add_argument("--present-col", default="VideoPresent", help='Inserted column name (default: "VideoPresent")')
@@ -265,7 +327,9 @@ def main() -> int:
     if not args.dir.is_dir():
         raise SystemExit(f"Directory not found: {args.dir}")
 
-    out_path = args.out or args.csv.with_name(f"{args.csv.stem}_checked{args.csv.suffix}")
+    base_out = args.csv.with_name(f"{args.csv.stem}_with_filesystem_check")
+    csv_out_path = args.csv_out or base_out.with_suffix(".csv")
+    xlsx_out_path = args.xlsx_out or base_out.with_suffix(".xlsx")
 
     dialect, headers = detect_dialect_and_headers(args.csv, args.encoding)
 
@@ -289,9 +353,13 @@ def main() -> int:
 
     key_index = build_key_index(args.dir, recursive=args.recursive)
 
-    total = present = 0
+    wb, ws, col_widths = init_workbook(out_headers)
 
-    with args.csv.open("r", encoding=args.encoding, newline="") as fin, out_path.open(
+    total = 0
+    present = 0
+    xlsx_row_idx = 2  # row 1 is header
+
+    with args.csv.open("r", encoding=args.encoding, newline="") as fin, csv_out_path.open(
         "w", encoding=args.encoding, newline=""
     ) as fout:
         reader = csv.DictReader(fin, dialect=dialect)
@@ -310,13 +378,21 @@ def main() -> int:
 
             writer.writerow(new_row)
 
+            values = [new_row.get(h, "") for h in out_headers]
+            write_xlsx_row(ws, xlsx_row_idx, values, is_present, col_widths)
+            xlsx_row_idx += 1
+
             total += 1
             if is_present:
                 present += 1
 
+    finalize_workbook(ws, col_widths)
+    wb.save(xlsx_out_path)
+
     print(f"Rows processed: {total}")
     print(f"Present: {present} / {total}")
-    print(f"Output written: {out_path}")
+    print(f"CSV output written:  {csv_out_path}")
+    print(f"XLSX output written: {xlsx_out_path}")
     return 0
 
 
