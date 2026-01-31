@@ -69,3 +69,21 @@ Identify missing episode videos and report them to `MediathekView-Eisenbahn-Roma
 ```
 ./report_missing_er_files.py MediathekView-Eisenbahn-Romantik.csv  /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/ eisenbahn_romantik_tvdb_episodes_and_specials.json
 ```
+
+## Daily use (2): Download the latest episode list from TVDB, and check for presence
+
+Fetch the latest list of episodes from TVDB, and write the output to `eisenbahn_romantik_tvdb_episodes.csv`:
+
+```
+./fetch-railway-romance-episodes.py
+```
+
+Check which files are present on OMV:
+
+```
+mount /mnt/omv-data1
+./check_videos_presence.py --csv eisenbahn_romantik_tvdb_episodes.csv \
+                           --out eisenbahn_romantik_tvdb_episodes_with_presence_check.csv \
+                           --dir /mnt/omv-data1/Video/Dokumentationen/Eisenbahn-Romantik/
+```
+
