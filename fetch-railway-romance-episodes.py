@@ -137,6 +137,29 @@ def fetch_all_episodes_from_allseasons() -> List[Episode]:
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
+    # Cache age diagnostics
+    age_header = resp.headers.get("Age")
+    if age_header is not None:
+        try:
+            age_seconds = int(age_header)
+            hours = age_seconds // 3600
+            minutes = (age_seconds % 3600) // 60
+            seconds = age_seconds % 60
+            print(
+                f"CDN cache age: {age_seconds} s "
+                f"({hours} h {minutes} min {seconds} s)"
+            )
+        except ValueError:
+            print(f"CDN cache age header present but not numeric: {age_header}")
+    else:
+        print("No Age header present (likely not served from CDN cache).")
+
+    # Also show cache status
+    x_cache = resp.headers.get("X-Cache")
+    if x_cache:
+        print(f"CDN cache status: {x_cache}")
+
+
     # All episode links on the All Seasons page
     episode_links = soup.select('a[href*="/series/railway-romance/episodes/"]')
 
