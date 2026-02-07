@@ -113,6 +113,41 @@ def parse_date_en(date_str: str) -> str:
     return ""
 
 
+def print_cache_policy(resp):
+    import re
+
+    cc = resp.headers.get("Cache-Control", "")
+    age = int(resp.headers.get("Age", 0))
+
+    m = re.search(r"max-age=(\d+)", cc)
+
+    if not m:
+        print("No max-age directive found.")
+        return
+
+    max_age = int(m.group(1))
+
+    h = max_age // 3600
+    m_ = (max_age % 3600) // 60
+    print(f"Max cache age: {h} h {m_} min ({max_age} s)")
+
+    h = age // 3600
+    m_ = (age % 3600) // 60
+    print(f"Current cache age: {h} h {m_} min ({age} s)")
+
+    remaining = max_age - age
+    if remaining > 0:
+        h = remaining // 3600
+        m_ = (remaining % 3600) // 60
+        print(f"Cache expires in: {h} h {m_} min")
+    else:
+        print("Cache already expired or revalidating.")
+
+    x_cache = resp.headers.get("X-Cache")
+    if x_cache:
+        print(f"CDN cache status: {x_cache}")
+
+
 def fetch_all_episodes_from_allseasons() -> List[Episode]:
     """
     Fetch episodes from TheTVDB "All Seasons" page:
@@ -134,31 +169,9 @@ def fetch_all_episodes_from_allseasons() -> List[Episode]:
     print(f"Loading All-Seasons page: {ALLSEASONS_URL}")
     resp = requests.get(ALLSEASONS_URL, headers=headers, timeout=30)
     resp.raise_for_status()
+    print_cache_policy(resp)
 
     soup = BeautifulSoup(resp.text, "html.parser")
-
-    # Cache age diagnostics
-    age_header = resp.headers.get("Age")
-    if age_header is not None:
-        try:
-            age_seconds = int(age_header)
-            hours = age_seconds // 3600
-            minutes = (age_seconds % 3600) // 60
-            seconds = age_seconds % 60
-            print(
-                f"CDN cache age: {age_seconds} s "
-                f"({hours} h {minutes} min {seconds} s)"
-            )
-        except ValueError:
-            print(f"CDN cache age header present but not numeric: {age_header}")
-    else:
-        print("No Age header present (likely not served from CDN cache).")
-
-    # Also show cache status
-    x_cache = resp.headers.get("X-Cache")
-    if x_cache:
-        print(f"CDN cache status: {x_cache}")
-
 
     # All episode links on the All Seasons page
     episode_links = soup.select('a[href*="/series/railway-romance/episodes/"]')
